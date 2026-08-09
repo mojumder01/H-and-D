@@ -1,0 +1,6 @@
+chrome_agent_profile/
+__pycache__/
+*.pyc
+.env
+output/*.xlsx
+output/*.xlsm
