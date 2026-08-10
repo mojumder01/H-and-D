@@ -8,6 +8,9 @@ No Anthropic API key.
 
 ## Setup
 
+**Quickest path: double-click `run.bat`.** It runs first-time setup automatically if needed, starts Chrome with remote debugging, waits for you to log in, then launches `app.py` - all from one window. Skip to step 6 below once it's running.
+
+Manual / step-by-step version (same thing, split across two windows):
 1. Run `setup_windows.bat` once.
 2. Run `start_chrome.bat`.
 3. In the opened Chrome, manually log in to Claude.ai.
@@ -35,6 +38,8 @@ Found an existing output file from a previous run: products_processed.xlsx
 ```
 
 Choosing **Resume** picks up exactly where it stopped - rows already marked `COMPLETED` (per task) are skipped, and it prints how many rows are left before continuing. Choosing **Start over** re-copies a clean version from the original input file, discarding all progress (useful if you fixed something in the input and want a clean re-run).
+
+If it stops early for any reason, just run `run.bat` (or `python app.py`) again - same file, same Claude URL, same task choice - and pick **Resume**.
 
 Important:
 - Close all normal Chrome windows before `start_chrome.bat` if Chrome refuses the custom profile.
