@@ -1,6 +1,6 @@
 import time
 from browser.prompt import build_prompt
-from browser.parser import extract_sections
+from browser.parser import extract_fields
 
 # Confirmed against a live claude.ai DOM dump:
 #   <div role="feed" aria-label="Chat messages" ...>
@@ -103,9 +103,9 @@ class ClaudeAgent:
             f"{SEND_ATTEMPTS} attempts (click/Enter did not submit it)."
         )
 
-    def process(self,row):
+    def process(self,row,tasks):
         before=self._total_messages() or 0
-        prompt=build_prompt(row)
+        prompt=build_prompt(row,tasks)
         box=self._input()
         self._submit(box,prompt)
 
@@ -128,7 +128,7 @@ class ClaudeAgent:
             if turn.count()==0 or turn.first.get_attribute("data-is-streaming")!="false":
                 continue  # still generating, keep waiting
             text=response.inner_text(timeout=3000)
-            return extract_sections(text)
+            return extract_fields(text,tasks)
         if not saw_new_message:
             raise TimeoutError(
                 "Message was sent but the conversation's total message count "

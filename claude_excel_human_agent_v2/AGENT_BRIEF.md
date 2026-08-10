@@ -4,11 +4,18 @@ Bring this file (and, if relevant, the `output/*_processed.xlsx` you were runnin
 
 ## What this project does
 
-`app.py` reads product rows from an Excel file, sends each row to a Claude.ai conversation already open in a human-logged-in Chrome (via CDP, `browser/chrome_connector.py`), waits for a reply containing two tagged HTML sections, and writes them back into the same workbook (`Highlights HTML`, `Description HTML`, `Status`, `Retry`, `Error` columns).
+`app.py` reads product rows from an Excel file, sends each row to a Claude.ai conversation already open in a human-logged-in Chrome (via CDP, `browser/chrome_connector.py`), waits for a reply, and writes the result back into the same workbook. It supports two independent tasks, selected at startup:
+
+- `hd` (Highlights + Description): writes `Highlights HTML`, `Description HTML`, tracked via `Status`/`Retry`/`Error`.
+- `weight` (Weight estimate): writes `Weight (kg)` (a plain number, no unit text, or `unknown`), tracked via `Weight Status`/`Weight Retry`/`Weight Error`.
+
+Mode 3 runs both tasks in **one combined Claude message per row** (see `browser/prompt.py:build_prompt(row, tasks)`), not two separate exchanges — this keeps it just as fast as running either task alone. `TASKS` in `app.py` is the single source of truth mapping each task to its status/retry/error columns and its output column(s); add a new task there (plus a section in `prompt.py` and a case in `parser.py:extract_fields`) rather than hardcoding new columns elsewhere.
+
+Per-row skip logic is per-task: a row is only skipped entirely if every task selected for *this run* already shows `COMPLETED` in its own status column (`app.py:remaining_tasks`). Running Highlights+Description today and Weight tomorrow on the same file never redoes finished work either way. `excel/writer.py:ensure_columns()` auto-adds any missing output columns to the copied output file at startup, so no manual Excel template setup is required when a new task is used for the first time.
 
 ## The contract Claude's reply must satisfy
 
-Defined in `browser/prompt.py` and enforced by `browser/parser.py`:
+Defined in `browser/prompt.py:build_prompt()` (sections included depend on which tasks were requested) and enforced by `browser/parser.py:extract_fields()`:
 
 ```
 HIGHLIGHTS_HTML
@@ -16,11 +23,15 @@ HIGHLIGHTS_HTML
 
 DESCRIPTION_HTML
 <p>...</p><p>...</p>
+
+WEIGHT_KG
+<a single decimal number, e.g. 0.35>
 ```
 
 - No preamble ("Here is the HTML...") — `parser.py` doesn't strip it, and if there's no preamble rule violation it usually means `prompt.py`'s "no preamble" rule needs to be stated more forcefully, or the parser's regex needs to tolerate it.
-- Highlights must use `<ul>/<li>` only; description must use `<p>` only. Anything else fails `extract_sections()` in `browser/parser.py`.
-- Claude must not invent facts not present in the row's `Highlights`/`Description`/`Product Name` columns.
+- Highlights must use `<ul>/<li>` only; description must use `<p>` only. Anything else fails `_extract_hd()` in `browser/parser.py`.
+- Weight must be a plain decimal (or the literal word `unknown`) — no "kg" suffix, no other text. `_match_weight()` strips a `(kg)`/`kg` label if Claude adds one anyway, but the value itself should never contain unit text.
+- Claude must not invent HTML facts not present in the row's `Highlights`/`Description`/`Product Name` columns. Weight, by contrast, is *meant* to be an estimate — `prompt.py`'s `WEIGHT_RULES` asks Claude to reason from product type/material/size/quantity rather than refuse.
 
 ## Failure modes and where to look
 
@@ -33,9 +44,10 @@ DESCRIPTION_HTML
 | `Claude was still generating a reply when the timeout was reached.` | Response genuinely took longer than `RESPONSE_TIMEOUT_MS` (e.g. a "High" reasoning-effort model thinking longer, or a long product description) | `config.py`/`.env` → raise `RESPONSE_TIMEOUT_MS` |
 | `Message was not accepted by Claude's composer after 3 attempts...` | The click/Enter didn't actually submit the message (composer still had the text). Previously this manifested as a silent 2-minute `TimeoutError` per row since the code waited the full `RESPONSE_TIMEOUT_MS` for a reply to a message that was never sent - fixed by confirming delivery via the same `aria-setsize` total-message check within ~8s and retrying the send instead of waiting it out | `browser/claude_agent.py` → `_submit()` |
 | Output columns are filled with the literal prompt template (e.g. `Highlights HTML` = `<ul>\n<li>...</li>\n</ul>`, `Description HTML` ends with the `Rules:` block) marked `COMPLETED` | **Fixed — was the root cause of "doesn't wait after input".** The assistant-selector guesses matched nothing, so the old code fell back to `page.locator("body").inner_text()`. Since the prompt template itself contains the literal words `HIGHLIGHTS_HTML`/`DESCRIPTION_HTML`, the agent's own just-submitted (echoed) message satisfied the "response arrived" check instantly, before Claude ever replied. Fixed by confirming the real DOM against a live conversation (see below) and switching to `data-is-streaming="false"` for completion detection — never falls back to whole-page text. | `browser/claude_agent.py` |
-| Description HTML column has a trailing sentence after the last `</p>` (e.g. "Note: I dropped X since...") | Claude appended an explanatory note after the code block, which `_match_headings()` used to capture along with everything else to end-of-text | `browser/parser.py` → `_trim_after_last_closing_tag()` now truncates at the last `</ul>`/`</p>`; fixed |
-| `Could not identify both HTML sections.` / `Invalid highlights HTML.` / `Invalid description HTML.` | Claude added conversational text, used markdown instead of raw HTML, or used the wrong tags | `browser/prompt.py` (tighten instructions) and/or `browser/parser.py` (loosen regex) |
-| Output quality is bad (invented specs, wrong tone, missing facts) | Prompt wording, not code | `browser/prompt.py` — describe the bad example row and what you wanted instead |
+| Description HTML column has a trailing sentence after the last `</p>` (e.g. "Note: I dropped X since...") | Claude appended an explanatory note after the code block, which `_match_hd_headings()` used to capture along with everything else to end-of-text | `browser/parser.py` → `_trim_after_last_closing_tag()` now truncates at the last `</ul>`/`</p>`; fixed |
+| `Could not identify both HTML sections.` / `Invalid highlights HTML.` / `Invalid description HTML.` | Claude added conversational text, used markdown instead of raw HTML, or used the wrong tags | `browser/prompt.py` (tighten instructions) and/or `browser/parser.py:_extract_hd()` (loosen regex) |
+| `Could not identify a weight value.` | Claude didn't produce a recognizable `WEIGHT_KG` marker or a `Weight`/`Weight (kg)` heading with a number after it | `browser/parser.py:_match_weight()` — paste the actual reply text and I'll extend the pattern |
+| Output quality is bad (invented specs, wrong tone, missing facts, or a wildly wrong weight estimate) | Prompt wording, not code | `browser/prompt.py` — describe the bad example row and what you wanted instead |
 | Rows silently marked `FAILED` after 3 tries | Real error captured in the `Error` column of the output Excel — read that first | `config.py` `MAX_RETRIES` / `RESPONSE_TIMEOUT_MS` if it's just timing |
 | A row shows `COMPLETED` but you want to know if it needed a retry | `Error` column on a `COMPLETED` row now carries a note like `attempt 1 failed: ...` if earlier attempts failed before it eventually succeeded, instead of being silently wiped blank | `app.py` (`prior_errors` tracking) |
 | Wrong/missing input columns | Excel doesn't have `Product Name` / `Highlights` / `Description` headers | `excel/reader.py` (column lookup is by header name, row 1) |
