@@ -66,18 +66,22 @@ def main():
             r=row["_excel_row"]
             if str(row.get("Status") or "").upper()=="COMPLETED":
                 print(f"[{i}/{len(rows)}] SKIP row {r}"); continue
+            prior_errors=[]
             for attempt in range(1,MAX_RETRIES+1):
                 try:
                     writer.write_status(r,"PROCESSING",attempt,"")
                     result=agent.process(row)
-                    writer.write_result(r,result["highlights_html"],result["description_html"],"COMPLETED",attempt,"")
+                    note="; ".join(f"attempt {n} failed: {msg}" for n,msg in prior_errors)
+                    writer.write_result(r,result["highlights_html"],result["description_html"],"COMPLETED",attempt,note)
                     print(f"[{i}/{len(rows)}] DONE row {r}")
                     break
                 except Exception as e:
-                    print(f"[{i}/{len(rows)}] Attempt {attempt} failed: {e}")
-                    writer.write_status(r,"RETRYING",attempt,str(e))
+                    msg=str(e)
+                    print(f"[{i}/{len(rows)}] Attempt {attempt} failed: {msg}")
+                    prior_errors.append((attempt,msg))
+                    writer.write_status(r,"RETRYING",attempt,msg)
                     if attempt==MAX_RETRIES:
-                        writer.write_status(r,"FAILED",attempt,str(e))
+                        writer.write_status(r,"FAILED",attempt,msg)
                     time.sleep(2**attempt)
             time.sleep(BETWEEN_ROWS_MS/1000)
     finally:
