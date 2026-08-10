@@ -24,6 +24,18 @@ No Anthropic API key.
 
 You can run the same file through different modes on different occasions (e.g. Highlights+Description today, Weight tomorrow) — each task tracks its own completion, so re-running never redoes work that's already done, whichever mode you pick.
 
+## Interrupted / multi-day runs
+
+Large files can take a long time to fully process, and the run may need to stop partway through — power loss, the PC restarting, closing the terminal, etc. This is safe: every row's result is saved to the output file immediately (not just at the end), and each save is written atomically so an abrupt interruption mid-save can't corrupt the file. When you run `python app.py` again on the same input file, it detects the existing output file and asks:
+
+```
+Found an existing output file from a previous run: products_processed.xlsx
+  [1] Resume from where it left off (recommended)
+  [2] Start over (overwrites the existing progress)
+```
+
+Choosing **Resume** picks up exactly where it stopped - rows already marked `COMPLETED` (per task) are skipped, and it prints how many rows are left before continuing. Choosing **Start over** re-copies a clean version from the original input file, discarding all progress (useful if you fixed something in the input and want a clean re-run).
+
 Important:
 - Close all normal Chrome windows before `start_chrome.bat` if Chrome refuses the custom profile.
 - The project uses a separate `chrome_agent_profile` folder so it does not need to touch your normal Chrome profile.

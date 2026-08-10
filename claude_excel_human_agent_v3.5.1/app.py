@@ -86,6 +86,22 @@ def result_values(tasks,result,attempt,note):
             values[col]=result[key]
     return values
 
+def choose_resume_or_restart(output_name):
+    print(f"\nFound an existing output file from a previous run: {output_name}")
+    print("  [1] Resume from where it left off (recommended)")
+    print("  [2] Start over (overwrites the existing progress)")
+    while True:
+        try:
+            n=int(input("Select [1-2]: "))
+            if n in (1,2): return n==1
+        except ValueError: pass
+        print("Invalid selection.")
+
+def progress_summary(output,sheet,tasks):
+    rows=ExcelReader(str(output),sheet).read_rows()
+    done=sum(1 for row in rows if not remaining_tasks(row,tasks))
+    return done,len(rows)
+
 def main():
     print("="*65)
     print(" Claude Excel Human Automation Agent v3.5.1")
@@ -98,8 +114,15 @@ def main():
 
     output=Path(OUTPUT_DIR)/(input_file.stem+"_processed"+input_file.suffix)
     Path(OUTPUT_DIR).mkdir(exist_ok=True)
-    shutil.copy2(input_file,output)
+
+    resuming=output.exists() and choose_resume_or_restart(output.name)
+    if not resuming:
+        shutil.copy2(input_file,output)
     ensure_columns(str(output),sheet,needed_columns(tasks))
+
+    if resuming:
+        done,total=progress_summary(output,sheet,tasks)
+        print(f"Resuming: {done}/{total} rows already done for the selected task(s), {total-done} remaining.")
 
     print("\nPaste the Claude conversation URL.")
     print("Example: https://claude.ai/chat/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx")
