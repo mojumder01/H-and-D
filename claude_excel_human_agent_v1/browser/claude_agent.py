@@ -33,12 +33,11 @@ class ClaudeAgent:
         raise RuntimeError("Claude message input not found.")
 
     def _send(self):
-        # Unconfirmed against a live DOM (the composer was empty when
-        # captured, so the send button - which only appears once there's
-        # text - wasn't visible). Enter-to-submit is the reliable fallback.
+        # Confirmed against a live claude.ai DOM dump (composer populated
+        # with text): <button aria-label="Send message" ...>.
         selectors=[
-            'button[aria-label="Send Message"]',
             'button[aria-label="Send message"]',
+            'button[aria-label="Send Message"]',
         ]
         for s in selectors:
             loc=self.page.locator(s)
