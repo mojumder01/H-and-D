@@ -1,4 +1,4 @@
-# Claude Excel Human Automation Agent v3.5.1
+# Claude Excel Human Automation Agent v3.5.2
 
 This is the Claude.ai counterpart to the ChatGPT Excel Human Automation Agent. It does NOT automate Anthropic account login.
 

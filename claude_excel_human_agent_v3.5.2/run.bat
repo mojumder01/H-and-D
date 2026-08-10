@@ -3,7 +3,7 @@ setlocal
 cd /d "%~dp0"
 
 echo ==========================================
-echo Claude Excel Human Automation Agent v3.5.1
+echo Claude Excel Human Automation Agent v3.5.2
 echo ==========================================
 echo.
 

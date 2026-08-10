@@ -104,7 +104,7 @@ def progress_summary(output,sheet,tasks):
 
 def main():
     print("="*65)
-    print(" Claude Excel Human Automation Agent v3.5.1")
+    print(" Claude Excel Human Automation Agent v3.5.2")
     print(" Existing Chrome Session | No API Key")
     print("="*65)
     input_file=select_excel()
