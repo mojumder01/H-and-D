@@ -3,20 +3,32 @@ from browser.prompt import build_prompt
 from browser.parser import extract_sections
 
 # Confirmed against a live claude.ai DOM dump:
-#   <div data-is-streaming="false" class="group relative ...">
-#       <h2 class="sr-only">Claude responded: ...</h2>
-#       <div class="font-claude-response ...">...actual reply markup...</div>
+#   <div role="feed" aria-label="Chat messages" ...>
+#     <div role="article" aria-setsize="4" aria-posinset="1" aria-label="Message 1 of 4">...</div>
+#     <div role="article" aria-setsize="4" aria-posinset="2" aria-label="Message 2 of 4">
+#       <div data-is-streaming="false" class="group relative ...">
+#         <h2 class="sr-only">Claude responded: ...</h2>
+#         <div class="font-claude-response ...">...actual reply markup...</div>
+#       </div>
+#     </div>
+#     ...
 #   </div>
-# data-is-streaming flips to "false" once generation is complete, and
-# .font-claude-response wraps only Claude's own reply body (never the user's
-# message, never the sr-only summary heading).
+#
+# IMPORTANT: claude.ai virtualizes this list once the conversation gets long -
+# older [role="article"]/div[data-is-streaming] nodes get unmounted from the
+# DOM to save memory. Counting those nodes directly (an earlier version of
+# this file did) is unreliable: the raw DOM count can stay flat or even drop
+# as a new message arrives if an old one gets unmounted at the same time,
+# causing the agent to falsely conclude "nothing new happened" and burn the
+# full RESPONSE_TIMEOUT_MS waiting for a reply that had already arrived.
+#
+# aria-setsize is the fix: it's the ARIA "feed" pattern's declared TOTAL
+# message count, authored from the app's real conversation state - it stays
+# correct even when most of the conversation isn't mounted in the DOM. Any
+# currently-rendered article (e.g. the last one) reports the true total.
+ARTICLE_SELECTOR='[role="article"]'
 TURN_SELECTOR='div[data-is-streaming]'
 RESPONSE_SELECTOR='.font-claude-response'
-# Wraps only the user's own submitted message bubble - confirmed in the same
-# DOM dump. Used to confirm a send actually registered, fast, instead of
-# waiting the full RESPONSE_TIMEOUT_MS for a reply that will never come
-# because the click/Enter silently didn't submit anything.
-USER_MESSAGE_SELECTOR='[data-testid="user-message"]'
 SEND_CONFIRM_TIMEOUT_S=8
 SEND_ATTEMPTS=3
 
@@ -55,19 +67,21 @@ class ClaudeAgent:
             except: pass
         return False
 
-    def _turn_count(self):
-        try: return self.page.locator(TURN_SELECTOR).count()
-        except: return 0
+    def _total_messages(self):
+        # None means "couldn't tell" (e.g. no articles rendered yet), treated
+        # as 0 by callers - never treated as "definitely no new message".
+        loc=self.page.locator(ARTICLE_SELECTOR)
+        try:
+            if loc.count()==0: return None
+            v=loc.last.get_attribute("aria-setsize")
+            return int(v) if v else None
+        except: return None
 
-    def _turn(self,index):
-        return self.page.locator(TURN_SELECTOR).nth(index)
-
-    def _user_message_count(self):
-        try: return self.page.locator(USER_MESSAGE_SELECTOR).count()
-        except: return 0
+    def _last_article(self):
+        return self.page.locator(ARTICLE_SELECTOR).last
 
     def _submit(self,box,prompt):
-        before=self._user_message_count()
+        before=self._total_messages() or 0
         box.click()
         try: box.fill(prompt)
         except: self.page.keyboard.insert_text(prompt)
@@ -77,8 +91,8 @@ class ClaudeAgent:
                 box.press("Enter")
             deadline=time.time()+SEND_CONFIRM_TIMEOUT_S
             while time.time()<deadline:
-                if self._user_message_count()>before:
-                    return  # delivery confirmed - the message bubble appeared
+                if (self._total_messages() or 0)>before:
+                    return  # delivery confirmed - a new message appeared
                 time.sleep(0.5)
             # not delivered within the confirm window - the text is likely
             # still sitting unsent in the box; re-focus and try sending again
@@ -90,38 +104,44 @@ class ClaudeAgent:
         )
 
     def process(self,row):
-        before=self._turn_count()
+        before=self._total_messages() or 0
         prompt=build_prompt(row)
         box=self._input()
         self._submit(box,prompt)
 
         from config import RESPONSE_TIMEOUT_MS
         deadline=time.time()+RESPONSE_TIMEOUT_MS/1000
-        saw_new_turn=False
-        was_streaming=False
+        saw_new_message=False
+        saw_assistant_turn=False
         while time.time()<deadline:
             time.sleep(1)
-            after=self._turn_count()
+            after=self._total_messages() or 0
             if after<=before:
                 continue
-            saw_new_turn=True
-            turn=self._turn(after-1)
-            if turn.get_attribute("data-is-streaming")!="false":
-                was_streaming=True
+            saw_new_message=True
+            article=self._last_article()
+            response=article.locator(RESPONSE_SELECTOR)
+            if response.count()==0:
+                continue  # the newest message so far is still just the echoed user turn
+            saw_assistant_turn=True
+            turn=article.locator(TURN_SELECTOR)
+            if turn.count()==0 or turn.first.get_attribute("data-is-streaming")!="false":
                 continue  # still generating, keep waiting
-            text=turn.locator(RESPONSE_SELECTOR).inner_text(timeout=3000)
+            text=response.inner_text(timeout=3000)
             return extract_sections(text)
-        if not saw_new_turn:
+        if not saw_new_message:
             raise TimeoutError(
-                "Message was sent but no new Claude reply turn appeared on "
-                "the page within the timeout. TURN_SELECTOR/RESPONSE_SELECTOR "
-                "in browser/claude_agent.py likely don't match Claude.ai's "
-                "current DOM - see AGENT_BRIEF.md."
+                "Message was sent but the conversation's total message count "
+                "never increased. ARTICLE_SELECTOR in browser/claude_agent.py "
+                "likely doesn't match Claude.ai's current DOM - see AGENT_BRIEF.md."
             )
-        if was_streaming:
+        if not saw_assistant_turn:
             raise TimeoutError(
-                "Claude was still generating a reply when the timeout was "
-                "reached. Increase RESPONSE_TIMEOUT_MS in .env if this "
-                "product routinely needs a long response."
+                "A new message appeared but no Claude reply turn showed up "
+                "under it before the timeout."
             )
-        raise TimeoutError("Timed out waiting for Claude response.")
+        raise TimeoutError(
+            "Claude was still generating a reply when the timeout was "
+            "reached. Increase RESPONSE_TIMEOUT_MS in .env if this product "
+            "routinely needs a long response."
+        )
