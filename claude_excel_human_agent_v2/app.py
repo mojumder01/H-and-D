@@ -34,7 +34,7 @@ def select_sheet(path):
 
 def main():
     print("="*65)
-    print(" Claude Excel Human Automation Agent v1")
+    print(" Claude Excel Human Automation Agent v2")
     print(" Existing Chrome Session | No API Key")
     print("="*65)
     input_file=select_excel()
