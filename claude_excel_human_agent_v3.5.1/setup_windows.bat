@@ -1,6 +1,6 @@
 @echo off
 echo ==========================================
-echo Claude Excel Human Automation Agent v2
+echo Claude Excel Human Automation Agent v3.5.1
 echo ==========================================
 python -m venv .venv
 call .venv\Scripts\activate

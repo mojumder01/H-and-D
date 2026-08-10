@@ -1,4 +1,4 @@
-# Agent Brief — Claude Excel Human Automation Agent v2
+# Agent Brief — Claude Excel Human Automation Agent v3.5.1
 
 Bring this file (and, if relevant, the `output/*_processed.xlsx` you were running) back to a Claude chat when something breaks or the generated HTML looks wrong. This doc tells the assistant what the project expects, so it can diagnose from the symptom instead of re-reading everything from scratch.
 

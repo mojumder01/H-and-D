@@ -88,7 +88,7 @@ def result_values(tasks,result,attempt,note):
 
 def main():
     print("="*65)
-    print(" Claude Excel Human Automation Agent v2")
+    print(" Claude Excel Human Automation Agent v3.5.1")
     print(" Existing Chrome Session | No API Key")
     print("="*65)
     input_file=select_excel()
