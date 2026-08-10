@@ -7,6 +7,14 @@ def clean(v):
     v=re.sub(r'^html[ \t]*\n','',v,flags=re.I)
     return v.strip()
 
+def _trim_after_last_closing_tag(v,tag):
+    # Claude sometimes appends a trailing note after the code block (e.g.
+    # "Note: I dropped X since it wasn't supported by the source data.").
+    # Drop anything after the last real closing tag so that prose doesn't
+    # end up inside the Excel HTML columns.
+    idx=v.lower().rfind(tag)
+    return v[:idx+len(tag)] if idx!=-1 else v
+
 def _match_markers(text):
     h=re.search(r'HIGHLIGHTS_HTML\s*:?[ \t]*(.*?)(?=\n\s*DESCRIPTION_HTML\s*:?)',text,re.I|re.S)
     d=re.search(r'DESCRIPTION_HTML\s*:?[ \t]*(.*)$',text,re.I|re.S)
@@ -20,7 +28,10 @@ def _match_headings(text):
     # as its own line in inner_text()). Match that shape too.
     h=re.search(r'^[ \t]*Highlights[ \t]*$\s*(?:^[ \t]*html[ \t]*$\s*)?(.*?)(?=^[ \t]*Description[ \t]*$|\Z)',text,re.I|re.M|re.S)
     d=re.search(r'^[ \t]*Description[ \t]*$\s*(?:^[ \t]*html[ \t]*$\s*)?(.*)\Z',text,re.I|re.M|re.S)
-    if h and d: return clean(h.group(1)),clean(d.group(1))
+    if h and d:
+        h=_trim_after_last_closing_tag(clean(h.group(1)),'</ul>')
+        d=_trim_after_last_closing_tag(clean(d.group(1)),'</p>')
+        return h,d
     return None,None
 
 def extract_sections(text):

@@ -2,10 +2,16 @@ import time
 from browser.prompt import build_prompt
 from browser.parser import extract_sections
 
-ASSISTANT_SELECTORS=[
-    '.font-claude-message',
-    '[data-testid="chat-message"]',
-]
+# Confirmed against a live claude.ai DOM dump:
+#   <div data-is-streaming="false" class="group relative ...">
+#       <h2 class="sr-only">Claude responded: ...</h2>
+#       <div class="font-claude-response ...">...actual reply markup...</div>
+#   </div>
+# data-is-streaming flips to "false" once generation is complete, and
+# .font-claude-response wraps only Claude's own reply body (never the user's
+# message, never the sr-only summary heading).
+TURN_SELECTOR='div[data-is-streaming]'
+RESPONSE_SELECTOR='.font-claude-response'
 
 class ClaudeAgent:
     def __init__(self,page):
@@ -13,9 +19,9 @@ class ClaudeAgent:
 
     def _input(self):
         selectors=[
+            'div[data-testid="chat-input"]',
             'div[contenteditable="true"].ProseMirror',
             'div[contenteditable="true"]',
-            'textarea[placeholder*="Reply"]',
             'textarea',
         ]
         for s in selectors:
@@ -27,6 +33,9 @@ class ClaudeAgent:
         raise RuntimeError("Claude message input not found.")
 
     def _send(self):
+        # Unconfirmed against a live DOM (the composer was empty when
+        # captured, so the send button - which only appears once there's
+        # text - wasn't visible). Enter-to-submit is the reliable fallback.
         selectors=[
             'button[aria-label="Send Message"]',
             'button[aria-label="Send message"]',
@@ -40,30 +49,15 @@ class ClaudeAgent:
             except: pass
         return False
 
-    def _assistant_locator(self):
-        # Only matches selectors known to wrap Claude's OWN reply. No whole-page
-        # fallback here on purpose: falling back to body text previously caused
-        # the agent to read back the user's own just-submitted prompt (which
-        # literally contains the words HIGHLIGHTS_HTML/DESCRIPTION_HTML) as if
-        # it were Claude's answer, without ever waiting for a real response.
-        for s in ASSISTANT_SELECTORS:
-            loc=self.page.locator(s)
-            try:
-                if loc.count(): return loc
-            except: pass
-        return None
+    def _turn_count(self):
+        try: return self.page.locator(TURN_SELECTOR).count()
+        except: return 0
 
-    def _assistant_count(self):
-        loc=self._assistant_locator()
-        return loc.count() if loc else 0
-
-    def _assistant_text_at(self,index):
-        loc=self._assistant_locator()
-        if loc is None: raise RuntimeError("No Claude assistant message elements found on page.")
-        return loc.nth(index).inner_text(timeout=3000)
+    def _turn(self,index):
+        return self.page.locator(TURN_SELECTOR).nth(index)
 
     def process(self,row):
-        before=self._assistant_count()
+        before=self._turn_count()
         prompt=build_prompt(row)
         box=self._input()
         box.click()
@@ -75,26 +69,21 @@ class ClaudeAgent:
         from config import RESPONSE_TIMEOUT_MS
         deadline=time.time()+RESPONSE_TIMEOUT_MS/1000
         saw_new_turn=False
-        stable_text=None
         while time.time()<deadline:
             time.sleep(1)
-            after=self._assistant_count()
+            after=self._turn_count()
             if after<=before:
                 continue
             saw_new_turn=True
-            text=self._assistant_text_at(after-1)
-            if "HIGHLIGHTS_HTML" not in text or "DESCRIPTION_HTML" not in text:
-                stable_text=None
-                continue
-            # require the text to stop changing for a beat before trusting it,
-            # so we don't cut off a still-streaming reply mid-generation.
-            if text==stable_text:
-                return extract_sections(text)
-            stable_text=text
+            turn=self._turn(after-1)
+            if turn.get_attribute("data-is-streaming")!="false":
+                continue  # still generating, keep waiting
+            text=turn.locator(RESPONSE_SELECTOR).inner_text(timeout=3000)
+            return extract_sections(text)
         if not saw_new_turn:
             raise TimeoutError(
-                "No new Claude reply detected on the page. The selectors in "
-                "ASSISTANT_SELECTORS (browser/claude_agent.py) likely don't "
+                "No new Claude reply detected on the page. TURN_SELECTOR/"
+                "RESPONSE_SELECTOR in browser/claude_agent.py likely don't "
                 "match Claude.ai's current DOM - see AGENT_BRIEF.md."
             )
         raise TimeoutError("Timed out waiting for Claude response.")
