@@ -1,7 +1,7 @@
 @echo off
 setlocal
 echo ==========================================
-echo Claude Excel Human Automation Agent v3.5.2
+echo Claude Excel Human Automation Agent v3.5.3
 echo ==========================================
 python -m venv .venv
 if errorlevel 1 (

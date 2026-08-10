@@ -1,4 +1,4 @@
-# Claude Excel Human Automation Agent v3.5.2
+# Claude Excel Human Automation Agent v3.5.3
 
 This is the Claude.ai counterpart to the ChatGPT Excel Human Automation Agent. It does NOT automate Anthropic account login.
 
@@ -40,6 +40,8 @@ Found an existing output file from a previous run: products_processed.xlsx
 Choosing **Resume** picks up exactly where it stopped - rows already marked `COMPLETED` (per task) are skipped, and it prints how many rows are left before continuing. Choosing **Start over** re-copies a clean version from the original input file, discarding all progress (useful if you fixed something in the input and want a clean re-run).
 
 If it stops early for any reason, just run `run.bat` (or `python app.py`) again - same file, same Claude URL, same task choice - and pick **Resume**.
+
+**If someone opens the output `.xlsx` in Excel while a run is in progress**, Windows will briefly block the save. The app doesn't crash - it prints which file to close and waits for you to press Enter, then continues automatically, no lost progress and no restart needed.
 
 Important:
 - Close all normal Chrome windows before `start_chrome.bat` if Chrome refuses the custom profile.

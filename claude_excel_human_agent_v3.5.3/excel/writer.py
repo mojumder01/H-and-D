@@ -1,6 +1,21 @@
 import os
 from openpyxl import load_workbook
 
+def wait_until_unlocked(fn,file_label):
+    # On Windows, opening the output file in Excel (or antivirus/OneDrive
+    # briefly scanning it) blocks other processes from overwriting/renaming
+    # it, raising PermissionError. For a run that can take multiple days,
+    # someone opening the file to peek at progress is a near-certainty -
+    # that must not crash the whole job. Wait for the user to close it and
+    # retry, rather than losing the row/state that was about to be saved.
+    while True:
+        try:
+            return fn()
+        except PermissionError:
+            print(f"\nCould not save - '{file_label}' appears to be open in Excel "
+                  f"(or locked by another program). Close it, then press Enter to retry...")
+            input()
+
 def _atomic_save(wb,path):
     # If power is cut / the process is killed mid-save, the ORIGINAL file
     # must survive intact - this project has to be resumable across
@@ -12,7 +27,7 @@ def _atomic_save(wb,path):
     tmp=path+".tmp"
     wb.save(tmp)
     wb.close()
-    os.replace(tmp,path)
+    wait_until_unlocked(lambda: os.replace(tmp,path),os.path.basename(path))
 
 def ensure_columns(path,sheet,columns):
     wb=load_workbook(path); ws=wb[sheet]

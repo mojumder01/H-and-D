@@ -3,7 +3,7 @@ from pathlib import Path
 from openpyxl import load_workbook
 from config import INPUT_DIR, OUTPUT_DIR, MAX_RETRIES, BETWEEN_ROWS_MS
 from excel.reader import ExcelReader
-from excel.writer import ExcelWriter, ensure_columns
+from excel.writer import ExcelWriter, ensure_columns, wait_until_unlocked
 from browser.chrome_connector import ChromeConnector
 
 TASKS={
@@ -104,7 +104,7 @@ def progress_summary(output,sheet,tasks):
 
 def main():
     print("="*65)
-    print(" Claude Excel Human Automation Agent v3.5.2")
+    print(" Claude Excel Human Automation Agent v3.5.3")
     print(" Existing Chrome Session | No API Key")
     print("="*65)
     input_file=select_excel()
@@ -117,7 +117,7 @@ def main():
 
     resuming=output.exists() and choose_resume_or_restart(output.name)
     if not resuming:
-        shutil.copy2(input_file,output)
+        wait_until_unlocked(lambda: shutil.copy2(input_file,output),output.name)
     ensure_columns(str(output),sheet,needed_columns(tasks))
 
     if resuming:
